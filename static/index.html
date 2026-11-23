@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ポケモン鳴き声推定</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>ポケモン鳴き声推定</h1>
+        <p class="description">音声ファイルをアップロードして、どのポケモンか当てよう！</p>
+
+        <div class="upload-section">
+            <input type="file" id="audioFile" accept=".wav, .ogg, audio/*" />
+            <button id="predictBtn">判定する</button>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p>解析中...</p>
+        </div>
+
+        <div id="resultArea" class="hidden">
+            <h2>推定結果 (Top-3)</h2>
+            <ul id="predictionList"></ul>
+        </div>
+
+        <div id="errorArea" class="error hidden"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

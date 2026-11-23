@@ -1,10 +1,7 @@
-librosa
-numpy
-torch
-torchaudio
-soundfile
-onnx
+fastapi
+uvicorn[standard]
+python-multipart
 onnxruntime
-matplotlib
-scipy
-tqdm
+librosa
+soundfile
+numpy
