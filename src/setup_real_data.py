@@ -11,67 +11,94 @@ DATA_NOISE_DIR = "data/noise"
 OTHER_CLASS_DIR = os.path.join(DATA_RAW_DIR, "00_other")
 
 def setup_directories():
-    for d in [DATA_RAW_DIR, DATA_NOISE_DIR, OTHER_CLASS_DIR]:
-        os.makedirs(d, exist_ok=True)
+    os.makedirs(DATA_RAW_DIR, exist_ok=True)
+    os.makedirs(DATA_NOISE_DIR, exist_ok=True)
+    os.makedirs("models", exist_ok=True)
+    # Ensure other class dir is there too as it's inside DATA_RAW_DIR
+    os.makedirs(OTHER_CLASS_DIR, exist_ok=True)
 
-def clean_dummy_data():
-    print("Cleaning dummy data...")
+def clean_existing_data():
+    print("Cleaning existing raw data...")
     raw_dir = Path(DATA_RAW_DIR)
-    for f in raw_dir.glob("*.wav"):
-        if f.stem.isdigit():
-            try: f.unlink()
-            except: pass
+    if raw_dir.exists():
+        import shutil
+        # We want to keep the folder structure but clear it? 
+        # Or just delete everything in DATA_RAW_DIR for a clean start.
+        for item in raw_dir.iterdir():
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+            except Exception as e:
+                print(f"Could not delete {item}: {e}")
 
-def download_pokemon_cries(species_list):
-    for entry in species_list:
+def download_pokemon_cries(targets_csv):
+    print(f"Downloading from {targets_csv}...")
+    if not os.path.exists(targets_csv):
+        print(f"Error: {targets_csv} not found.")
+        return
+
+    with open(targets_csv, 'r', encoding='utf-8-sig') as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    for idx, line in enumerate(lines):
         try:
-            dex_id, name = entry.split(':')
-            name = name.lower().strip()
-            target_dir = os.path.join(DATA_RAW_DIR, f"{int(dex_id)}_{name}")
+            parts = line.split(',')
+            if len(parts) < 2: continue
+            dex_id_str = parts[0].strip()
+            name = parts[1].strip().lower()
+            dex_id = int(dex_id_str)
+            
+            folder_num = idx + 1
+            target_dir = os.path.join(DATA_RAW_DIR, f"{folder_num:02d}_{name}")
             os.makedirs(target_dir, exist_ok=True)
 
             for variant in ["latest", "legacy"]:
-                url = f"https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/{variant}/{int(dex_id)}.ogg"
+                url = f"https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/{variant}/{dex_id}.ogg"
                 filename = os.path.join(target_dir, f"{name}_{variant}.ogg")
                 print(f"Downloading {url} -> {filename}")
                 response = requests.get(url)
                 if response.status_code == 200:
-                    with open(filename, "wb") as f:
-                        f.write(response.content)
+                    with open(filename, "wb") as f_out:
+                        f_out.write(response.content)
+                else:
+                    print(f"  Failed to download {dex_id} ({variant}): Status {response.status_code}")
+
         except Exception as e:
-            print(f"Error processing entry '{entry}': {e}")
+            print(f"Error processing line '{line}': {e}")
 
 def generate_background_noise():
-    print("Generating background noise...")
-    patterns = ["white", "pink", "hum60", "beep4k", "rumble", "silence"]
-    for i, name in enumerate(patterns):
-        file_path = os.path.join(OTHER_CLASS_DIR, f"{i:02d}_{name}.wav")
+    print("Generating background noise in 00_other...")
+    os.makedirs(OTHER_CLASS_DIR, exist_ok=True)
+    patterns = [("white", "white"), ("hum60", "hum")]
+    for i, (name, p_type) in enumerate(patterns):
+        file_path = os.path.join(OTHER_CLASS_DIR, f"noise_{i:02d}.wav")
         duration = 5.0
         t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
-        if name == "white": audio = np.random.uniform(-1, 1, len(t))
-        elif name == "pink":
-            audio = np.cumsum(np.random.normal(0, 1, len(t)))
-            audio -= audio.mean()
-            audio /= (np.max(np.abs(audio)) + 1e-8) * 0.5
-        elif name == "hum60": audio = 0.3 * np.sin(2 * np.pi * 60 * t) + 0.1 * np.random.normal(0, 0.05, len(t))
-        elif name == "beep4k": audio = 0.2 * np.sin(2 * np.pi * 4000 * t) + 0.1 * np.random.normal(0, 0.05, len(t))
-        elif name == "rumble": audio = 0.3 * np.sin(2 * np.pi * 80 * t + 2*np.pi*4*t) + 0.1 * np.random.normal(0, 0.05, len(t))
-        else: audio = np.zeros_like(t)
+        if p_type == "white":
+            audio = np.random.uniform(-1, 1, len(t))
+        elif p_type == "hum":
+            audio = 0.3 * np.sin(2 * np.pi * 60 * t) + 0.1 * np.random.normal(0, 0.05, len(t))
+        else:
+            audio = np.zeros_like(t)
         sf.write(file_path, audio, SAMPLE_RATE)
 
 def generate_augmentation_noise():
-    print("Generating augmentation noise...")
+    print("Generating environment noise for augmentation...")
+    os.makedirs(DATA_NOISE_DIR, exist_ok=True)
     for i in range(5):
         file_path = os.path.join(DATA_NOISE_DIR, f"env_{i:02d}.wav")
-        t = np.linspace(0, 5, int(SAMPLE_RATE * 5), endpoint=False)
-        audio = (np.random.normal(0, 0.1, len(t)) + 0.3*np.sin(2*np.pi*50*t) + 0.2*np.sin(2*np.pi*150*t))
+        t = np.linspace(0, 3, int(SAMPLE_RATE * 3), endpoint=False)
+        audio = (np.random.normal(0, 0.1, len(t)) + 0.5 * np.sin(2 * np.pi * 100 * t))
         sf.write(file_path, audio, SAMPLE_RATE)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('species', nargs='*', help="dexID:name")
+    parser.add_argument('--targets', type=str, default='targets.csv')
     args = parser.parse_args()
-    if not args.species: args.species = ["384:rayquaza", "25:pikachu", "6:charizard", "150:mewtwo"]
-    setup_directories(); clean_dummy_data(); download_pokemon_cries(args.species); generate_background_noise(); generate_augmentation_noise()
+    # Order matters: clean first then setup dirs to ensure they exist when we write files
+    clean_existing_data(); setup_directories(); download_pokemon_cries(args.targets); generate_background_noise(); generate_augmentation_noise()
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": 
+    main()
