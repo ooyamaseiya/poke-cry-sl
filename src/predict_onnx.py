@@ -1,100 +1,68 @@
-import os
-import sys
-import json
-import numpy as np
-import librosa
 import onnxruntime as ort
-from src import config
+import numpy as np
+import torch
+from src.audio_processor import AudioProcessor
+import json
+import os
 
-def predict_wav(wav_path):
-    # 1. Load Config and Models
-    models_dir = "models"
-    config_path = os.path.join(models_dir, "config.json")
-    model_path = os.path.join(models_dir, "pokemon_model.onnx")
-    labels_path = os.path.join(models_dir, "labels.json")
-
-    if not (os.path.exists(config_path) and os.path.exists(model_path) and os.path.exists(labels_path)):
-        print("Error: Model or config files missing in 'models/' directory.")
-        return
-
-    with open(config_path, 'r') as f:
-        cfg = json.load(f)
-    with open(labels_path, 'r') as f:
-        # labels are strings of digits like "0": "classname"
-        labels = {int(k): v for k, v in json.load(f).items()}
-
+def predict(model_path, audio_path, labels_json):
+    # 1. Load Model and Labels
     session = ort.InferenceSession(model_path)
-    input_name = session.get_inputs()[0].name
+    with open(labels_json, 'r') as f:
+        rev_labels = json.load(f)
 
-    # 2. Preprocess Audio (Match Training Pipeline)
-    sr = cfg["SAMPLE_RATE"]
-    num_samples = cfg["NUM_SAMPLES"]
-    n_fft = cfg["N_FFT"]
-    hop_length = cfg["HOP_LENGTH"]
-    n_mels = cfg["N_MELS"]
-
-    # Load and trim (using librosa as in preparation)
-    y, _ = librosa.load(wav_path, sr=sr, mono=True)
-    yt, _ = librosa.effects.trim(y, top_db=cfg.get("TRIM_TOP_DB", 30))
-
-    if len(yt) >= num_samples:
-        energies = np.abs(yt)
-        peak_idx = np.argmax(energies)
-        start_idx = peak_idx - num_samples // 2
-        if start_idx < 0:
-            start_idx = 0
-        elif start_idx + num_samples > len(yt):
-            start_idx = len(yt) - num_samples
-        y_final = yt[start_idx : start_idx + num_samples]
-    else:
-        y_final = np.zeros(num_samples, dtype=np.float32)
-        actual_len = min(len(yt), num_samples)
-        y_final[:actual_len] = yt[:actual_len]
-
-    # Normalize
-    max_val = np.max(np.abs(y_final))
-    if max_val > 1e-8:
-        y_final /= max_val
-
-    # Mel Spectrogram (Librosa) - Must be exactly same as training!
-    S = librosa.feature.melspectrogram(y=y_final, sr=sr, n_fft=n_fft, hop_length=hop_length, 
-                                      n_mels=n_mels, fmin=cfg["F_MIN"], fmax=cfg["F_MAX"])
-    S_db = librosa.power_to_db(S, ref=np.max)
-
-    # Standardization (Mean/Std per sample as in preparation script)
-    mean = np.mean(S_db)
-    std = np.std(S_db)
-    if std > 1e-8:
-        S_db = (S_db - mean) / std
-    else:
-        S_db = S_db - mean
-
-    # Shape to (Batch, Channel, Freq, Time) -> (1, 1, 64, 251)
-    input_tensor = S_db[np.newaxis, np.newaxis, ...]
-    if input_tensor.shape[3] < 251: # Safety check for time dimension mismatch if sr/hop change
-        # (In our case it should be exactly 251)
-        pass
+    ap = AudioProcessor()
+    
+    # 2. Preprocess audio to match model input shape [1, 1, 64, 251]
+    y, _ = ap.load_audio(audio_path)
+    spec = ap.preprocess_waveform(y) # Shape (64, 251) after trimming/padding? No, get_spectrogram does it better.
+    # Let's use the full pipeline which returns [64, 251] correctly based on instruction.
+    spec = ap.get_spectrogram(ap.preprocess_waveform(y)) # Actually preprocess_waveform handles length/padding? Yes.
+    
+    # Input shape: (Batch=1, Channel=1, Freq=64, Time=251)
+    input_tensor = spec[np.newaxis, np.newaxis, :, :] 
 
     # 3. Inference
-    logits = session.run(None, {input_name: input_tensor})[0]
-    probs = np.exp(logits) / np.sum(np.exp(logits)) # Softmax for probabilities (actually logits might need softmax if model doesn't have it, 
-                                                  # but typically ONNX outputs raw scores/logits or after softmax depends on implementation.
-                                                  # Our CNN has Linear as last layer without Softmax in PyTorch, so we do manual Logits -> Probs)
+    inputs = {session.get_inputs()[0].name: input_tensor}
+    logits = session.run(None, inputs)[0] # Shape [1, num_classes]
 
-    # If the model output was already probabilities (it's not), this would be different. 
-    # But my train.py uses CrossEntropyLoss which expects logits. Correct.
+    # Apply softmax for probabilities
+    def softmax(x):
+        e_x = np.exp(x - np.max(x))
+        return e_x / e_x.sum()
 
-    # Get Top-3
-    top_k_indices = np.argsort(probs[0])[-3:][::-1] # Last three, reversed
+    probs = softmax(logits[0])
     
-    print("\n--- Prediction Results ---")
-    for idx in top_k_indices:
-        label = labels.get(int(idx), f"Unknown({idx})")
-        prob_pct = probs[0][idx] * 100
-        print(f"{label}: {prob_pct:.2f}%")
+    # 4. Top-3 Results
+    top_indices = probs.argsort()[-3:][::-1]
+    results = []
+    for idx in top_indices:
+        label_id = str(idx) # labels.json keys are strings (from json)
+        name = rev_labels.get(label_id, f"Unknown({idx})")
+        prob = probs[idx] * 100
+        results.append((name, prob))
+
+    return results
 
 if __name__ == "__main__":
+    import sys
     if len(sys.argv) < 2:
-        print("Usage: python src/predict_onnx.py path/to/audio.wav")
-    else:
-        predict_wav(sys.argv[1])
+        print("Usage: python -m src.predict_onnx /path/to/model.onnx /path/to/audio.ogg")
+        sys.exit(1)
+
+    MODEL_PATH = sys.argv[1]
+    AUDIO_FILE = sys.argv[2]
+    LABELS_JSON = "models/labels.json"
+
+    if not os.path.exists(MODEL_PATH):
+        print(f"Model file {MODEL_PATH} not found.")
+        sys.exit(1)
+
+    try:
+        predictions = predict(MODEL_PATH, AUDIO_FILE, LABELS_JSON)
+        print("\nTop-3 Predictions:")
+        for i, (name, prob) in enumerate(predictions):
+            print(f"{i+1}. {name}: {prob:.2f}%")
+    except Exception as e:
+        print(f"Error during prediction: {e}")
+

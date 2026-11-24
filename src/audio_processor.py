@@ -1,9 +1,8 @@
-import os
-import io
-import json
-import librosa
 import numpy as np
+import librosa
 import soundfile as sf
+import json
+import io
 
 class AudioProcessor:
     def __init__(self, config_path):
@@ -11,92 +10,102 @@ class AudioProcessor:
             self.config = json.load(f)
         
         self.sample_rate = self.config['SAMPLE_RATE']
-        self.duration = self.config['DURATION']
-        self.num_samples = self.config['NUM_SAMPLES']
+        self.num_samples = int(self.config['NUM_SAMPLES'])
         self.n_fft = self.config['N_FFT']
         self.hop_length = self.config['HOP_LENGTH']
         self.n_mels = self.config['N_MELS']
-        self.f_min = self.config['F_MIN']
-        self.f_max = self.config['F_MAX']
-        self.trim_top_db = self.config['TRIM_TOP_DB']
-        self.margin_sec = self.config['MARGIN_SEC']
+        self.f_min = float(self.config['F_MIN'])
+        self.f_max = float(self.config['F_MAX'])
+        self.trim_top_db = self.config.get('TRIM_TOP_DB', 30)
+        self.margin_sec = self.config.get('MARGIN_SEC', 0.15)
 
-    def process(self, audio_bytes: bytes) -> np.ndarray:
-        # Load audio from bytes
-        audio_file = io.BytesIO(audio_bytes)
-        y, sr = librosa.load(audio_file, sr=self.sample_rate, mono=True)
+    def load_audio(self, source: bytes):
+        """Loads audio from bytes into a numpy array."""
+        with io.BytesIO(source) as audio_file:
+            # librosa.load を使用して、指定したサンプリングレートで読み込み、
+            # 自動的にモノラル化およびリサンプリングを行う。
+            y, sr = librosa.load(audio_file, sr=self.sample_rate, mono=True)
+        return y.astype(np.float32)
 
-        # 1. Trim silence
-        # Using top_db threshold for trimming silent parts at start and end
-        ytrimmed, _ = librosa.effects.trim(y, top_db=self.trim_top_db)
-        
-        # Add margin (0.15s * sample_rate samples on each side roughly, but let's be precise if possible)
+    def preprocess_waveform(self, waveform):
+        """Trims, pads/crops, and normalizes the audio waveform."""
+        # 1. Trim + Margin
+        try:
+            # librosa.effects.trim returns trimmed signal and indices
+            y_trimmed, index = librosa.effects.trim(waveform, top_db=self.trim_top_db)
+            start_idx, end_idx = int(index[0]), int(index[1])
+        except Exception:
+             # Fallback if trimming fails or has unexpected behavior
+             y_trimmed = waveform
+             start_idx, end_idx = 0, len(waveform)
+
         margin_samples = int(self.margin_sec * self.sample_rate)
-        if len(ytrimmed) < 2 * margin_samples:
-            # If audio is too short, just use it as is or pad with zeros later
-            y_padded = np.pad(ytrimmed, (0, max(0, self.num_samples - len(ytrimmed))), 'constant')
+        start = max(0, start_idx - margin_samples)
+        end = min(len(waveform), end_idx + margin_samples)
+        y_expanded = waveform[start:end]
+
+        # 2. Fixed length (target NUM_SAMPLES). Peak-centered crop or pad.
+        if len(y_expanded) < self.num_samples:
+            pad_len = self.num_samples - len(y_expanded)
+            y_fixed = np.pad(y_expanded, (0, pad_len), mode='constant')
         else:
-            # The trim effect might have removed a lot. Let's add the margin back to what was trimmed if possible? 
-            # Actually instructions say "trims silence... with 0.15s margin".
-            # This usually means we want at least some context around the sound.
-            # librosa.effects.trim returns the non-silent part.
-            # If the original audio was long, let's try to find where it started/ended in the original y? 
-            # But simpler is often better: just trim then pad to fixed length.
-            y_padded = ytrimmed
+            # Peak-centered crop if possible to keep the "sound" in the middle
+            peak_idx = np.argmax(np.abs(y_expanded))
+            half_target = self.num_samples // 2
+            start_crop = peak_idx - half_target
+            
+            if start_crop < 0:
+                start_crop = 0
+                end_crop = self.num_samples
+            elif start_crop + self.num_samples > len(y_expanded):
+                end_crop = len(y_expanded)
+                start_crop = max(0, end_crop - self.num_samples)
+            else:
+                end_crop = start_crop + self.num_samples
+            
+            y_fixed = y_expanded[start_crop:end_crop]
 
-        # Re-reading instruction carefully: "無音トリミング（前後0.15秒のマージン）" (Trimming silence with 0.15s margin).
-        # This might mean we find the non-silent segment and then add 0.15s padding to it? 
-        # Or that the trim should leave a 0.15s buffer of "not quite silent" audio if possible.
-        # Actually, librosa.effects.trim is good enough for general purposes.
+        # Ensure exact size (handles edge cases where slicing might leave 1 sample off due to rounding)
+        if len(y_fixed) > self.num_samples:
+             y_fixed = y_fixed[:self.num_samples]
+        elif len(y_fixed) < self.num_samples:
+             y_fixed = np.pad(y_fixed, (0, self.num_samples - len(y_fixed)), mode='constant')
 
-        # Let's use standard approach: trim silence, then ensure fixed length by padding/cropping.
-        y_trimmed = ytrimmed
-        
-        if len(y_trimmed) > self.num_samples:
-            y_fixed = y_trimmed[:self.num_samples]
-        else:
-            y_fixed = np.pad(y_trimmed, (0, max(0, self.num_samples - len(y_trimmed))), 'constant')
-
-        # 2. Volume normalization (peak amplitude to 1.0)
+        # 3. Peak Normalization
         max_val = np.max(np.abs(y_fixed))
-        if max_val > 0:
-            y_normalized = y_fixed / max_val
-        else:
-            y_normalized = y_fixed
+        if max_val > 1e-7:
+            y_fixed = y_fixed / max_val
 
-        # 3. Log-Mel Spectrogram conversion
-        mel_spec = librosa.feature.melspectrogram(
-            y=y_normalized,
-            sr=self.sample_rate,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            n_mels=self.n_mels,
-            fmin=self.f_min,
+        return y_fixed.astype(np.float32)
+
+    def get_spectrogram(self, waveform):
+        """Converts waveform to log-mel spectrogram."""
+        # Compute mel spectrogram
+        S = librosa.feature.melspectrogram(
+            y=waveform, 
+            sr=self.sample_rate, 
+            n_fft=self.n_fft, 
+            hop_length=self.hop_length, 
+            n_mels=self.n_mels, 
+            fmin=self.f_min, 
             fmax=self.f_max
         )
-        log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
-
-        # 4. Reshape for ONNX: [1, 1, n_mels, time_frames]
-        # Based on instructions/model requirement `[1, 1, 64, 251]`
-        # librosa returns (n_mels, n_frames)
-        # We need to ensure shape is exactly what model expects.
-        # If hop_length=160 and samples=40000, frames = ceil(40000/160) + 1? No, it's usually related to windowing.
-        # Let's force the shape by padding or cropping if needed for time dimension (the last one).
+        # Convert to log scale (decibels)
+        S_db = librosa.power_to_db(S, ref=np.max)
         
-        target_time_frames = log_mel_spec.shape[1] # This might be around 250-251
-        if target_time_frames < 251:
-             # Pad the end with silence (-80dB or something) if necessary, but let's check dimensions first.
-             pass
+        # Standardize the spectrogram values: (x - mean) / std
+        mean = np.mean(S_db)
+        std = np.std(S_db)
+        spec = ((S_db - mean) / (std + 1e-8)).astype(np.float32)
+        return spec
 
-        # Standard practice for fixed input size in CNNs/Transformers is padding/cropping to exact shape.
-        # The model expects [1, 1, 64, 251]
+    def full_pipeline(self, audio_bytes: bytes):
+        """Full processing pipeline from raw bytes to model input tensor."""
+        y = self.load_audio(audio_bytes)
+        wav_p = self.preprocess_waveform(y)
+        spec = self.get_spectrogram(wav_p)
         
-        spec_resized = np.zeros((self.n_mels, 251), dtype=np.float32)
-        num_frames_to_copy = min(log_mel_spec.shape[1], 251)
-        spec_resized[:, :num_frames_to_copy] = log_mel_spec[:, :num_frames_to_copy]
-
-        # Reshape to [1, 1, n_mels, time_steps] for CNN/ConvNet-like input
-        final_tensor = spec_resized[np.newaxis, np.newaxis, :, :] # shape (1, 1, 64, 251)
-
-        return final_tensor.astype(np.float32)
+        # Model expects shape [1, 1, n_mels, time_frames] -> here spec is (n_mels, frames)
+        # Based on instructions: [1, 1, 64, 251]
+        return np.expand_dims(np.expand_dims(spec, axis=0), axis=0)
 

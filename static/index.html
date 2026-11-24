@@ -1,32 +1,35 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ポケモン鳴き声推定</title>
+    <title>Pokemon Sound Classifier</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
-        <h1>ポケモン鳴き声推定</h1>
-        <p class="description">音声ファイルをアップロードして、どのポケモンか当てよう！</p>
+        <h1>Pokémon 鳴き声推定</h1>
+        <p class="description">音声ファイルをアップロードして、何のポケモンか当てよう！</p>
 
         <div class="upload-section">
-            <input type="file" id="audioFile" accept=".wav, .ogg, audio/*" />
-            <button id="predictBtn">判定する</button>
+            <input type="file" id="audioFile" accept=".wav, .ogg" hidden>
+            <label for="audioFile" class="custom-file-upload">ファイルを選択</label>
+            <div id="fileNameDisplay">ファイルが選択されていません</div>
+
+            <button id="predictBtn" disabled>判定する</button>
         </div>
 
-        <div id="loading" class="hidden">
+        <div id="loadingIndicator" class="hidden">
             <div class="spinner"></div>
             <p>解析中...</p>
         </div>
 
-        <div id="resultArea" class="hidden">
-            <h2>推定結果 (Top-3)</h2>
-            <ul id="predictionList"></ul>
-        </div>
+        <div id="errorArea" class="error-msg hidden"></div>
 
-        <div id="errorArea" class="error hidden"></div>
+        <div id="resultsArea" class="results-section hidden">
+            <h2>推論結果 (Top 3)</h2>
+            <ul id="predictionsList"></ul>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>

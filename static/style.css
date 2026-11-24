@@ -1,103 +1,165 @@
-/* Base Styles */
+/* General Styles */
 body {
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    background-color: #f4f7f6;
+    background-color: #f0f2f5;
+    margin: 0;
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    margin: 0;
 }
 
 .container {
     background: white;
     padding: 2rem;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
     width: 90%;
-    max-width: 400px;
+    max-width: 500px;
     text-align: center;
 }
 
-h1 { margin-top: 0; color: #333; }
-.description { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
+h1 {
+    color: #e3350f; /* Pokemon red */
+    margin-bottom: 0.5rem;
+}
+
+.description {
+    color: #666;
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+}
 
 /* Upload Section */
 .upload-section {
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    align-items: center;
+    margin-bottom: 2rem;
 }
 
+#fileNameDisplay {
+    font-size: 0.85rem;
+    color: #888;
+}
+
+/* Custom File Upload Button (Hidden input hack) */
 input[type="file"] {
-    width: 100%;
-    padding: 10px 0;
+    display: none;
 }
 
-button {
-    background-color: #ffcb05; /* Pokemon Yellow */
-    border: none;
-    padding: 12px;
-    font-size: 1rem;
-    font-weight: bold;
-    border-radius: 8px;
+.custom-file-upload, button#predictBtn {
+    display: inline-block;
+    padding: 12px 24px;
     cursor: pointer;
-    transition: background-color 0.3s ease;
+    border-radius: 30px;
+    font-weight: bold;
+    transition: all 0.3s ease;
 }
 
-button:hover { background-color: #fbbc2b; }
-button:disabled { background-color: #ccc; cursor: not-allowed; }
+.custom-file-upload {
+    background-color: #f0f0f0;
+    color: #333;
+    border: 2px dashed #ccc;
+}
+
+.custom-file-upload:hover {
+    background-color: #e8e8e8;
+}
+
+button#predictBtn {
+    background-color: #ffcb01; /* Pokemon yellow */
+    color: #3c5aaa; /* Pokemon blue shadow/text? No, let's use dark text for visibility */
+    border: none;
+    font-size: 1rem;
+    width: 100%;
+}
+
+button#predictBtn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+button#predictBtn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
 
 /* Loading Spinner */
-#loading {
-    margin-top: 2rem;
+#loadingIndicator {
+    margin: 1rem 0;
 }
 
 .spinner {
-    width: 40px;
-    height: 40px;
     border: 4px solid rgba(0, 0, 0, 0.1);
-    border-left-color: #ffcb05;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
+    border-left-color: #e3350f;
     animation: spin 1s linear infinite;
-    margin: 0 auto 1rem;
+    margin: 0 auto 0.5rem auto;
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
-/* Results */
-#resultArea {
-    margin-top: 2rem;
+/* Results Area */
+.results-section {
     text-align: left;
+    margin-top: 2rem;
+    border-top: 1px solid #eee;
+    padding-top: 1rem;
 }
 
-ul { list-style: none; padding: 0; }
-.prediction-item { margin-bottom: 1rem; }
-.info-row { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px;}
+#predictionsList {
+    list-style: none;
+    padding: 0;
+}
+
+.prediction-item {
+    margin-bottom: 1rem;
+}
+
+.prediction-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+}
+
+.prediction-name {
+    font-weight: bold;
+    color: #333;
+}
+
+/* Progress Bar */
 .progress-bar-container {
-    background: #eee;
-    border-radius: 5px;
-    height: 12px;
+    background-color: #eee;
+    border-radius: 10px;
+    height: 8px;
+    width: 100%;
     overflow: hidden;
 }
 
-.progress-bar {
+.progress-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, #ffcb05, #fbbc2b);
-    width: 0%;
-    transition: width 0.5s ease-out;
+    background-color: #ffcb01;
+    transition: width 0.5s ease;
 }
 
-/* Errors */
-.error {
-    color: #e74c3c;
-    background: #fdeaea;
-    padding: 10px;
-    border-radius: 6px;
-    margin-top: 1rem;
+/* Error Message */
+.error-msg {
+    color: #d32f2f;
+    background-color: #ffebee;
+    padding: 8px;
+    border-radius: 4px;
     font-size: 0.9rem;
 }
 
-.hidden { display: none; }
+/* Utilities */
+.hidden {
+    display: none !important;
+}
